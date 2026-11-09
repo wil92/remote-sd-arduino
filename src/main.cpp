@@ -1,6 +1,9 @@
+#include "main.h"
+
 #include <Arduino.h>
 
 #include "../lib/flash/flash_manager.h"
+#include "../lib/network/access_point_config.h"
 #include "../lib/network/network_manager.h"
 #include "../lib/webserver/web_server_manager.h"
 
@@ -52,8 +55,7 @@ void setup() {
         webServer.setup();
         webServer.run();
     } else {
-        if (!networkManager.createHotspot(flashManager.ssid,
-                                          flashManager.password)) {
+        if (!networkManager.createHotspot(AP_SSID, AP_PASSWORD)) {
             ESP.restart();
         }
         delay(100);

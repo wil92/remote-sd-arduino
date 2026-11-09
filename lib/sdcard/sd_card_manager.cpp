@@ -1,7 +1,7 @@
 #include "sd_card_manager.h"
 
 void SDCardManager::begin() {
-#ifndef PLATFORM_NATIVE
+#ifdef ARDUINO_ARCH_ESP32
     SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
 #endif
     if (!SD.begin(SD_CS, SPI)) {

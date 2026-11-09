@@ -1,13 +1,16 @@
 #pragma once
 
-#ifndef PLATFORM_NATIVE
+#ifdef ARDUINO_ARCH_ESP32
 #include <EEPROM.h>
 #else
 #include <Arduino.h>
 #endif
 
-#define STRINGIGY(v) #v
-#define TOSTRING(v) STRINGIGY(v)
+#if __has_include("../../include/network_config.h")
+#include "../../include/network_config.h"
+#else
+#include "../../include/network_config.example.h"
+#endif
 
 #define IS_ENABLE_FLAG 7
 #define CONFIG_STATUS_ADDRESS 0
@@ -21,11 +24,8 @@ class FlashManager {
 public:
     bool isSetup = false;
 
-    const char *ssid = "RemoteSDDevice";
-    const char *password = "remotesd";
-
-    String ssidNetwork = TOSTRING(NETWORK_SSID);
-    String passwordNetwork = TOSTRING(NETWORK_PASSWORD);
+    String ssidNetwork = NETWORK_SSID;
+    String passwordNetwork = NETWORK_PASSWORD;
 
     void loadSetup();
 

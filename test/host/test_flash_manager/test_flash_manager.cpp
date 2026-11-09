@@ -6,6 +6,14 @@
 
 using namespace fakeit;
 
+void testInitialCredentialsMatchNetworkConfiguration() {
+    FlashManager flashManager;
+
+    TEST_ASSERT_EQUAL_STRING(NETWORK_SSID, flashManager.ssidNetwork.c_str());
+    TEST_ASSERT_EQUAL_STRING(NETWORK_PASSWORD,
+                             flashManager.passwordNetwork.c_str());
+}
+
 void testLoadSetupClearsSetupStateWhenFlagIsNotSet() {
     FlashManager flashManager;
     flashManager.isSetup = true;
@@ -48,6 +56,7 @@ void tearDown(void) {}
 
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(testInitialCredentialsMatchNetworkConfiguration);
     RUN_TEST(testLoadSetupClearsSetupStateWhenFlagIsNotSet);
     RUN_TEST(testLoadSetupRestoresSavedCredentialsWhenFlagIsSet);
     RUN_TEST(testResetSetupClearsPersistedFlagAndSetupState);

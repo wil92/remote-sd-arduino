@@ -13,7 +13,7 @@ void FlashManager::loadSetup() {
 
 bool FlashManager::resetSetup() {
     EEPROM.write(CONFIG_STATUS_ADDRESS, 0);
-#ifndef PLATFORM_NATIVE
+#ifdef ARDUINO_ARCH_ESP32
     if (!EEPROM.commit()) {
         return false;
     }
@@ -31,7 +31,7 @@ void FlashManager::saveSetup() {
     saveString(ssidNetwork, &index);
     saveString(passwordNetwork, &index);
 
-#ifndef PLATFORM_NATIVE
+#ifdef ARDUINO_ARCH_ESP32
     EEPROM.commit();
 #endif
     // Serial.println("Data saved in flash memory");

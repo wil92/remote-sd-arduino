@@ -34,6 +34,7 @@ pio test -e tests -vvv
 
 ## Documentation
 
+- [Build configuration](doc/configuration.md)
 - [Configuration reset](docs/configuration-reset.md)
 - [Coding rules](docs/coding-rules.md)
 

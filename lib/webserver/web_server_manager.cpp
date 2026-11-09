@@ -5,7 +5,7 @@
 
 #include <cstdlib>
 
-#ifdef PLATFORM_NATIVE
+#ifndef ARDUINO_ARCH_ESP32
 #include <iostream>
 #endif
 
@@ -219,7 +219,7 @@ WebServerManager::consumeHeaders(WiFiClient *client) const {
             String key = line.substring(0, line.indexOf(":"));
             String value =
                 line.substring(line.indexOf(":") + 2, line.length() - 1);
-#ifdef PLATFORM_NATIVE
+#ifndef ARDUINO_ARCH_ESP32
             std::cout << "Header: " << key.c_str() << " -> " << value.c_str()
                       << std::endl;
 #endif

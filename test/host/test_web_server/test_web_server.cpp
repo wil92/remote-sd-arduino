@@ -8,9 +8,6 @@
 
 #include "../../../lib/webserver/web_server_manager.h"
 
-#define STRINGIGY(v) #v
-#define TOSTRING(v) STRINGIGY(v)
-
 class SDCardManagerTmp : public SDCardManager {
 public:
     std::vector<byte> data;
@@ -114,8 +111,7 @@ public:
     }
 
     void buildFixtureUploadRequest() {
-        char testFilePath[] = TOSTRING(TEST_FILE_PATH);
-        std::ifstream file(testFilePath, std::ios::binary);
+        std::ifstream file("test/host/sent.txt", std::ios::binary);
         TEST_ASSERT_TRUE_MESSAGE(file.is_open(),
                                  "Test fixture could not be opened");
 

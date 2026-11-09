@@ -1,2 +1,4 @@
 .pio
 .idea
+/include/*
+!/include/*.example.h

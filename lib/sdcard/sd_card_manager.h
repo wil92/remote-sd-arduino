@@ -1,6 +1,6 @@
 #pragma once
 
-#ifndef PLATFORM_NATIVE
+#ifdef ARDUINO_ARCH_ESP32
 #include <Arduino.h>
 #include <SD.h>
 #include <SPI.h>

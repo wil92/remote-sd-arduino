@@ -8,7 +8,7 @@
 #include <memory>
 #include <vector>
 
-#ifndef PLATFORM_NATIVE
+#ifdef ARDUINO_ARCH_ESP32
 #include <WiFiClient.h>
 #include <WiFiServer.h>
 
@@ -44,14 +44,14 @@ class WebServerManager {
 
     void handleFileDeletion(WiFiClient *client, const String &message);
 
-#ifdef PLATFORM_NATIVE
+#ifndef ARDUINO_ARCH_ESP32
 public:
 #endif
     void handleFileUpload(WiFiClient *client);
 
     std::map<String, String> parseQueryParameters(const String &query,
                                                   int startPoint) const;
-#ifdef PLATFORM_NATIVE
+#ifndef ARDUINO_ARCH_ESP32
 private:
 #endif
 
@@ -66,7 +66,7 @@ private:
     void connectSD() const {
         if (sf) {
             sf(true);
-#ifndef PLATFORM_NATIVE
+#ifdef ARDUINO_ARCH_ESP32
             delay(100);
 #endif
         }
