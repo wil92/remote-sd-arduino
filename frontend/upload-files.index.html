@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upload files</title>
+    <style>
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        li {
+            margin: 5px 0;
+        }
+
+        button {
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+<h1>Upload files page</h1>
+<h2>Files on the SD</h2>
+<input type="file" id="file_input"/>
+<button id="upload_button">upload file</button>
+<ul>
+    $$FILES$$
+<!--    asdf-->
+</ul>
+</body>
+<script>
+    const but = document.getElementById("upload_button");
+    but.onclick = function () {
+        const file = document.getElementById('file_input').files[0];
+        if (!file) {
+            console.error("No file selected");
+            return;
+        }
+        const formData = new FormData();
+        formData.append('file', file);
+        fetch('/upload', {
+            method: 'POST',
+            body: formData
+        })
+            .then(res => {
+                console.log(res);
+                location.reload();
+            })
+    };
+
+    function del(fileName) {
+        fetch(`/?file=${encodeURIComponent(fileName)}`, {method: 'DELETE'})
+            .then(res => {
+                console.log(res);
+                location.reload();
+            })
+            .catch(e => console.error(e));
+    };
+
+</script>
+</html>
