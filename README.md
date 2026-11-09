@@ -35,7 +35,7 @@ pio test -e tests -vvv
 ## Documentation
 
 - [Build configuration](doc/configuration.md)
-- [Configuration reset](docs/configuration-reset.md)
+- [Configuration reset](doc/configuration-reset.md)
 - [Coding rules](docs/coding-rules.md)
 
 ## ESP32-C3 Super mini Pinout

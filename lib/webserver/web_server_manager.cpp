@@ -30,6 +30,9 @@ void WebServerManager::checkForConnections() {
 
         while (client.connected() &&
                millis() - connectionTime <= CLIENT_TIMEOUT) {
+            if (checkResetButton) {
+                checkResetButton();
+            }
             if (client.available()) {
                 String line = client.readStringUntil('\n');
                 // Serial.println(line);
@@ -170,6 +173,9 @@ void WebServerManager::handleFileUpload(WiFiClient *client) {
 
     sdCardManager->openFile(fileName);
     while (client->connected()) {
+        if (checkResetButton) {
+            checkResetButton();
+        }
         if (client->available()) {
             byte bCh = client->read();
             char ch = static_cast<char>(bCh);
@@ -211,6 +217,9 @@ std::map<String, String>
 WebServerManager::consumeHeaders(WiFiClient *client) const {
     std::map<String, String> headers;
     while (client->connected()) {
+        if (checkResetButton) {
+            checkResetButton();
+        }
         if (client->available()) {
             String line = client->readStringUntil('\n');
             if (line.length() <= 2) {
@@ -231,6 +240,9 @@ WebServerManager::consumeHeaders(WiFiClient *client) const {
 
 String WebServerManager::consumeIncomingData(WiFiClient *client) const {
     while (client->connected()) {
+        if (checkResetButton) {
+            checkResetButton();
+        }
         if (client->available()) {
             String line = client->readStringUntil('\n');
             Serial.println("+" + line);

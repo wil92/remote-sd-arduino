@@ -2,6 +2,7 @@
 
 #include <WiFi.h>
 #include <WiFiMulti.h>
+#include <functional>
 #include <memory>
 
 class NetworkManager {
@@ -13,8 +14,10 @@ class NetworkManager {
 public:
     NetworkManager();
 
-    void connectToNetwork(const char *ssidNetwork, const char *passwordNetwork);
+    void connectToNetwork(const char *ssidNetwork, const char *passwordNetwork,
+                          const std::function<void()> &checkResetButton = {});
 
     bool createHotspot(const char *ssidNetwork,
-                       const char *passwordNetwork) const;
+                       const char *passwordNetwork,
+                       const std::function<void()> &checkResetButton = {}) const;
 };

@@ -80,6 +80,7 @@ private:
 
 public:
     FlashManager *flashManager = nullptr;
+    std::function<void()> checkResetButton;
     std::unique_ptr<WiFiServer> server;
     ResetFunction rf;
     EnableSDFunction sf;

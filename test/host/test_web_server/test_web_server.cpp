@@ -133,6 +133,57 @@ private:
     }
 };
 
+void testUploadPollsWhileWaitingForHeaders() {
+    class WaitingClient : public WiFiClientTmp {
+    public:
+        bool open = true;
+        bool connected() override { return open; }
+        bool available() override { return false; }
+    } client;
+
+    WebServerManager webServerManager;
+    int polls = 0;
+    webServerManager.checkResetButton = [&]() {
+        if (++polls == 3) {
+            client.open = false;
+        }
+    };
+
+    webServerManager.handleFileUpload(&client);
+
+    TEST_ASSERT_EQUAL(3, polls);
+    TEST_ASSERT_TRUE(client.response.find("400 Bad Request") !=
+                     std::string::npos);
+}
+
+void testUploadPollsWhileWaitingForFileData() {
+    class WaitingClient : public WiFiClientTmp {
+    public:
+        bool open = true;
+        bool connected() override { return open; }
+    } client;
+    client.buildUploadRequest(std::vector<byte>(4, 'x'));
+    client.readStringUntil('\n');
+    client.data.resize(client.data.size() - client.fileBytes.size() -
+                       std::strlen("\r\n------WebKitFormBoundarypCbNHDfIecaHIigU--\r\n"));
+
+    WebServerManager webServerManager;
+    SDCardManagerTmp sdCardManager;
+    webServerManager.sdCardManager = &sdCardManager;
+    int emptyPolls = 0;
+    webServerManager.checkResetButton = [&]() {
+        if (sdCardManager.openCalls && !client.available() &&
+            ++emptyPolls == 3) {
+            client.open = false;
+        }
+    };
+
+    webServerManager.handleFileUpload(&client);
+
+    TEST_ASSERT_EQUAL(3, emptyPolls);
+    TEST_ASSERT_EQUAL(1, sdCardManager.openCalls);
+}
+
 void testUploadFileCopiesFixtureExactly() {
     WiFiClientTmp client;
     client.buildFixtureUploadRequest();
@@ -409,6 +460,8 @@ void tearDown(void) {}
 
 int runUnitTests() {
     UNITY_BEGIN();
+    RUN_TEST(testUploadPollsWhileWaitingForHeaders);
+    RUN_TEST(testUploadPollsWhileWaitingForFileData);
     RUN_TEST(testUploadFileCopiesFixtureExactly);
     RUN_TEST(testUploadFilePreservesBinaryDataAcrossBufferBoundaries);
     RUN_TEST(testUploadFileAcceptsEmptyFile);
