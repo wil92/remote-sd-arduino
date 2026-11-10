@@ -45,3 +45,21 @@ button:disabled { opacity: .6; cursor: wait; }
 ul { padding: 0; list-style: none; }
 li { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin: .5rem 0; overflow-wrap: anywhere; }
 li button { flex-shrink: 0; }
+.upload-overlay[hidden] { display: none; }
+.upload-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    padding: 1.5rem;
+    background: #000a;
+}
+.upload-dialog {
+    box-sizing: border-box;
+    width: min(100%, 26rem);
+    padding: 1.5rem;
+    border-radius: .6rem;
+    background: #fff;
+}
+.upload-dialog progress { width: 100%; }

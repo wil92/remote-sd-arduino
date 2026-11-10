@@ -23,6 +23,13 @@ public:
     size_t openCalls = 0;
     size_t closeCalls = 0;
     size_t endCalls = 0;
+    size_t listCalls = 0;
+    std::vector<FileInfo> files;
+
+    std::vector<FileInfo> listFiles(bool) override {
+        ++listCalls;
+        return files;
+    }
 
     void appendFile(const String &, const byte *chunk, size_t size) override {
         data.insert(data.end(), chunk, chunk + size);
@@ -184,6 +191,54 @@ void testDeviceInfoIsJsonWithoutAccessingSD() {
         client.response.c_str());
     TEST_ASSERT_EQUAL(0, switches);
     TEST_ASSERT_EQUAL(0, sd.beginCalls);
+}
+
+void testFileListReturnsCacheWithoutAccessingSD() {
+    WiFiClientTmp client;
+    client.buildHeaders();
+    WebServerManager manager;
+    FlashManager flash;
+    flash.isSetup = true;
+    SDCardManagerTmp sd;
+    manager.flashManager = &flash;
+    manager.sdCardManager = &sd;
+    manager.filesInSD = {{"quote\"\\\n.gcode", 42}, {"other", 0}};
+    int switches = 0;
+    manager.sf = [&](bool) { ++switches; };
+
+    manager.checkEndpoints(&client, "GET /api/files HTTP/1.1\r");
+    TEST_ASSERT_TRUE(client.response.find("application/json") != std::string::npos);
+    TEST_ASSERT_TRUE(client.response.find("Cache-Control: no-store") != std::string::npos);
+    TEST_ASSERT_TRUE(client.response.find(
+        "[{\"name\":\"quote\\\"\\\\\\u000a.gcode\",\"size\":42},"
+        "{\"name\":\"other\",\"size\":0}]") != std::string::npos);
+    TEST_ASSERT_EQUAL(0, switches);
+    TEST_ASSERT_EQUAL(0, sd.listCalls);
+
+    manager.filesInSD.clear();
+    WiFiClientTmp emptyClient;
+    emptyClient.buildHeaders();
+    manager.checkEndpoints(&emptyClient, "GET /api/files HTTP/1.1\r");
+    TEST_ASSERT_TRUE(emptyClient.response.find("\r\n\r\n[]") != std::string::npos);
+    flash.isSetup = false;
+    WiFiClientTmp setupClient;
+    setupClient.buildHeaders();
+    manager.checkEndpoints(&setupClient, "GET /api/files HTTP/1.1\r");
+    TEST_ASSERT_TRUE(setupClient.response.find("404 Not Found") != std::string::npos);
+    TEST_ASSERT_EQUAL(0, switches);
+}
+
+void testUploadPageEscapesFileNames() {
+    WiFiClientTmp client;
+    client.buildHeaders();
+    WebServerManager manager;
+    FlashManager flash;
+    flash.isSetup = true;
+    manager.flashManager = &flash;
+    manager.filesInSD = {{"a'\"<b>&.gcode", 3}};
+    manager.checkEndpoints(&client, "GET / HTTP/1.1\r");
+    TEST_ASSERT_TRUE(client.response.find("a&#39;&quot;&lt;b&gt;&amp;.gcode") !=
+                     std::string::npos);
 }
 
 void testSetupSavesNameAndEndpointReturnsIt() {
@@ -530,6 +585,10 @@ void testUploadPollsWhileWaitingForFileData() {
 
     TEST_ASSERT_EQUAL(3, emptyPolls);
     TEST_ASSERT_EQUAL(1, sdCardManager.openCalls);
+    TEST_ASSERT_EQUAL(1, sdCardManager.closeCalls);
+    TEST_ASSERT_EQUAL(1, sdCardManager.endCalls);
+    TEST_ASSERT_EQUAL(0, sdCardManager.listCalls);
+    TEST_ASSERT_TRUE(client.response.find("400 Bad Request") != std::string::npos);
 }
 
 void testUploadFileCopiesFixtureExactly() {
@@ -539,6 +598,7 @@ void testUploadFileCopiesFixtureExactly() {
 
     WebServerManager webServerManager;
     SDCardManagerTmp sdCardManager;
+    sdCardManager.files = {{"test.bin", client.fileBytes.size()}};
     webServerManager.sdCardManager = &sdCardManager;
     webServerManager.handleFileUpload(&client);
 
@@ -552,6 +612,9 @@ void testUploadFileCopiesFixtureExactly() {
     TEST_ASSERT_EQUAL(1, sdCardManager.openCalls);
     TEST_ASSERT_EQUAL(1, sdCardManager.closeCalls);
     TEST_ASSERT_EQUAL(1, sdCardManager.endCalls);
+    TEST_ASSERT_EQUAL(1, sdCardManager.listCalls);
+    TEST_ASSERT_EQUAL(1, webServerManager.filesInSD.size());
+    TEST_ASSERT_EQUAL_STRING("test.bin", webServerManager.filesInSD[0].name.c_str());
     TEST_ASSERT_TRUE(client.response.find("204 No Content") !=
                      std::string::npos);
 }
@@ -829,6 +892,8 @@ void tearDown(void) {}
 int runUnitTests() {
     UNITY_BEGIN();
     RUN_TEST(testDeviceInfoIsJsonWithoutAccessingSD);
+    RUN_TEST(testFileListReturnsCacheWithoutAccessingSD);
+    RUN_TEST(testUploadPageEscapesFileNames);
     RUN_TEST(testSetupSavesNameAndEndpointReturnsIt);
     RUN_TEST(testSetupDoesNotLogRequestHeaders);
     RUN_TEST(testSetupRestartsAfterResponseEvenWithMoreClientData);

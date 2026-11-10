@@ -7,50 +7,147 @@
     <style>$$STYLES$$</style>
 </head>
 <body>
-<main>
+<main id="file_page">
     <h1>Upload files</h1>
     <label for="file_input">Choose a file</label>
     <input type="file" id="file_input">
-    <button id="upload_button" class="action" type="button">Upload file</button>
+    <button id="upload_button" class="action" type="button" disabled>Upload file</button>
     <p id="status" class="status" role="status" aria-live="polite"></p>
     <h2>Files on the SD card</h2>
-    <ul>$$FILES$$</ul>
+    <ul id="file_list">$$FILES$$</ul>
 </main>
+<div id="upload_overlay" class="upload-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="upload_title" tabindex="-1" hidden>
+    <div class="upload-dialog">
+        <h2 id="upload_title">Uploading file</h2>
+        <progress id="upload_progress" max="100"></progress>
+        <p id="upload_message" role="status" aria-live="polite">Uploading...</p>
+        <p>Keep this tab open. Closing or leaving it will cause the upload to fail.</p>
+    </div>
+</div>
 <script>
     const uploadButton = document.getElementById("upload_button");
     const fileStatus = document.getElementById("status");
+    const fileInput = document.getElementById("file_input");
+    const filePage = document.getElementById("file_page");
+    const fileList = document.getElementById("file_list");
+    const overlay = document.getElementById("upload_overlay");
+    const progress = document.getElementById("upload_progress");
+    const uploadMessage = document.getElementById("upload_message");
+    let busy = false;
+    let uploading = false;
+
+    window.addEventListener("beforeunload", event => {
+        if (uploading) {
+            event.preventDefault();
+            event.returnValue = "";
+        }
+    });
+
+    function setBusy(value) {
+        busy = value;
+        filePage.inert = value;
+        uploadButton.disabled = value || fileInput.files.length === 0;
+        fileInput.disabled = value;
+        for (const button of fileList.querySelectorAll("button")) button.disabled = value;
+    }
+
+    fileInput.onchange = () => {
+        uploadButton.disabled = busy || fileInput.files.length === 0;
+    };
 
     function showError(message) {
         fileStatus.textContent = message;
         fileStatus.classList.toggle("error", true);
     }
 
+    function uploadFile(data) {
+        return new Promise((resolve, reject) => {
+            const request = new XMLHttpRequest();
+            request.open("POST", "/upload");
+            request.upload.addEventListener("progress", event => {
+                if (event.lengthComputable && event.total > 0) {
+                    const percent = Math.floor(event.loaded * 100 / event.total);
+                    progress.value = percent;
+                    uploadMessage.textContent = percent === 100
+                        ? "Upload sent. Waiting for the device to finish..."
+                        : `Uploading: ${percent}%`;
+                }
+            });
+            request.addEventListener("load", () => {
+                if (request.status >= 200 && request.status < 300) resolve();
+                else reject(new Error(`HTTP ${request.status}`));
+            });
+            request.addEventListener("error", () => reject(new Error("Network error")));
+            request.addEventListener("abort", () => reject(new Error("Upload aborted")));
+            request.send(data);
+        });
+    }
+
+    function renderFiles(files) {
+        const items = files.map(file => {
+            const item = document.createElement("li");
+            const label = document.createElement("span");
+            const button = document.createElement("button");
+            label.textContent = `${file.name} - ${file.size}`;
+            button.type = "button";
+            button.textContent = "x";
+            button.onclick = () => del(file.name);
+            item.appendChild(label);
+            item.appendChild(button);
+            return item;
+        });
+        fileList.replaceChildren(...items);
+    }
+
     uploadButton.onclick = async function () {
-        const file = document.getElementById("file_input").files[0];
+        if (busy) return;
+        const file = fileInput.files[0];
         if (!file) {
             showError("Choose a file first.");
             return;
         }
         const data = new FormData();
         data.append("file", file);
-        uploadButton.disabled = true;
+        setBusy(true);
+        uploading = true;
+        overlay.hidden = false;
+        progress.removeAttribute("value");
+        uploadMessage.textContent = "Uploading...";
+        fileStatus.textContent = "";
+        fileStatus.classList.toggle("error", false);
+        overlay.focus();
+        let uploaded = false;
         try {
-            const response = await fetch("/upload", {method: "POST", body: data});
+            await uploadFile(data);
+            uploaded = true;
+            uploadMessage.textContent = "Upload complete. Updating the file list...";
+            const response = await fetch("/api/files", {cache: "no-store"});
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            location.reload();
+            renderFiles(await response.json());
+            fileStatus.textContent = "Upload complete.";
         } catch (error) {
-            showError(`Upload failed: ${error.message}`);
-            uploadButton.disabled = false;
+            showError(`${uploaded ? "Upload succeeded, but the file list could not be updated" : "Upload failed"}: ${error.message}`);
+        } finally {
+            uploading = false;
+            overlay.hidden = true;
+            fileInput.value = "";
+            setBusy(false);
+            fileInput.focus();
         }
     };
 
     async function del(fileName) {
+        if (busy) return;
+        if (!window.confirm(`Delete "${fileName}" from the SD card?`)) return;
+        setBusy(true);
         try {
             const response = await fetch(`/?file=${encodeURIComponent(fileName)}`, {method: "DELETE"});
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             location.reload();
         } catch (error) {
             showError(`Delete failed: ${error.message}`);
+            setBusy(false);
         }
     }
 </script>

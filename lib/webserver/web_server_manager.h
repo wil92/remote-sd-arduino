@@ -38,6 +38,8 @@ private:
 #endif
     void handleDeviceInfo(WiFiClient *client) const;
 
+    void handleFileList(WiFiClient *client) const;
+
     void startNetworkScan(WiFiClient *client) const;
 
     void sendNetworks(WiFiClient *client) const;

@@ -19,8 +19,14 @@ function element(value = "") {
         disabled: false,
         children: [],
         classList: { toggle(name, enabled) { this[name] = enabled; } },
-        replaceChildren() { this.children = []; },
+        replaceChildren(...children) { this.children = children; },
         appendChild(child) { this.children.push(child); },
+        querySelectorAll(selector) {
+            return this.children.flatMap(child =>
+                child.tag === selector ? [child] : child.querySelectorAll(selector));
+        },
+        removeAttribute(name) { delete this[name]; },
+        focus() {},
     };
 }
 
@@ -128,47 +134,174 @@ async function exerciseUpload(path) {
     const html = fs.readFileSync(path, "utf8");
     const script = html.match(/<script>([\s\S]*?)<\/script>/);
     const elements = {
-        upload_button: element(),
+        upload_button: Object.assign(element(), { disabled: true }),
         status: element(),
-        file_input: { files: [] },
+        file_input: Object.assign(element(), { files: [] }),
+        file_page: element(),
+        file_list: element(),
+        upload_overlay: element(),
+        upload_progress: element(),
+        upload_message: element(),
+    };
+    Object.defineProperty(elements.file_input, "value", {
+        get() { return this.files.length ? "selected" : ""; },
+        set(value) { if (value === "") this.files = []; },
+    });
+    const selectFile = () => {
+        elements.file_input.files = [{ name: "test.gcode" }];
+        elements.file_input.onchange();
+        assert.equal(elements.upload_button.disabled, false);
     };
     const requests = [];
     let result = response(500);
+    let pendingResponse;
     let reloads = 0;
+    let xhr;
+    let beforeUnload;
+    let confirmResult = false;
+    const confirmations = [];
     const context = {
-        document: { getElementById: id => elements[id] },
+        document: {
+            getElementById: id => elements[id],
+            createElement: tag => Object.assign(element(), { tag }),
+        },
+        window: {
+            addEventListener(name, callback) {
+                if (name === "beforeunload") beforeUnload = callback;
+            },
+            confirm(message) {
+                confirmations.push(message);
+                return confirmResult;
+            },
+        },
         location: { reload() { ++reloads; } },
         FormData: class {
             append(key, value) { this[key] = value; }
         },
+        XMLHttpRequest: class {
+            constructor() {
+                xhr = this;
+                this.events = {};
+                this.upload = { addEventListener: (name, callback) => {
+                    this.progress = callback;
+                } };
+            }
+            open(method, url) { this.method = method; this.url = url; }
+            addEventListener(name, callback) { this.events[name] = callback; }
+            send(data) { this.data = data; }
+            finish(status) { this.status = status; this.events.load(); }
+        },
         fetch: async (url, options) => {
             requests.push({ url, options });
+            if (pendingResponse) return pendingResponse;
             return result;
         },
         encodeURIComponent,
     };
     vm.runInNewContext(script[1], context);
+    const uploadTag = html.match(/<button[^>]*\bid="?upload_button"?[^>]*>/);
+    assert.ok(uploadTag);
+    assert.match(uploadTag[0], /\bdisabled\b/);
+    assert.equal(elements.upload_button.disabled, true);
     await elements.upload_button.onclick();
     assert.match(elements.status.textContent, /Choose/);
     assert.equal(requests.length, 0);
-    elements.file_input.files = [{ name: "test.gcode" }];
-    await elements.upload_button.onclick();
+    selectFile();
+    elements.file_input.files = [];
+    elements.file_input.onchange();
+    assert.equal(elements.upload_button.disabled, true);
+    selectFile();
+    let upload = elements.upload_button.onclick();
+    assert.equal(xhr.url, "/upload");
+    assert.equal(xhr.method, "POST");
+    assert.equal(xhr.data.file.name, "test.gcode");
+    assert.equal(elements.upload_overlay.hidden, false);
+    assert.equal(elements.file_page.inert, true);
+    assert.equal(elements.file_input.disabled, true);
+    let prevented = false;
+    const event = { preventDefault() { prevented = true; } };
+    beforeUnload(event);
+    assert.equal(prevented, true);
+    assert.equal(event.returnValue, "");
+    xhr.progress({ lengthComputable: true, loaded: 25, total: 100 });
+    assert.equal(elements.upload_progress.value, 25);
+    assert.match(elements.upload_message.textContent, /25%/);
+    xhr.progress({ lengthComputable: true, loaded: 100, total: 100 });
+    assert.match(elements.upload_message.textContent, /Waiting/);
+    await context.del("ignored");
+    assert.equal(requests.length, 0);
+    assert.equal(confirmations.length, 0);
+    xhr.finish(500);
+    await upload;
     assert.match(elements.status.textContent, /500/);
-    assert.equal(elements.upload_button.disabled, false);
+    assert.equal(elements.file_input.files.length, 0);
+    assert.equal(elements.upload_button.disabled, true);
+    assert.equal(elements.upload_overlay.hidden, true);
+    assert.equal(elements.file_page.inert, false);
     assert.equal(reloads, 0);
-    result = response(204);
-    await elements.upload_button.onclick();
-    assert.equal(requests[1].url, "/upload");
-    assert.equal(requests[1].options.body.file.name, "test.gcode");
-    assert.equal(reloads, 1);
+    assert.equal(requests.length, 0);
+    result = response(200, JSON.stringify([{ name: 'a"<b>.gcode', size: 12 }]));
+    let finishRefresh;
+    pendingResponse = new Promise(resolve => { finishRefresh = resolve; });
+    selectFile();
+    upload = elements.upload_button.onclick();
+    assert.equal(elements.upload_progress.value, undefined);
+    xhr.finish(204);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requests[0].url, "/api/files");
+    assert.equal(elements.upload_overlay.hidden, false);
+    assert.equal(elements.file_page.inert, true);
+    await context.del("ignored during refresh");
+    assert.equal(requests.length, 1);
+    assert.equal(confirmations.length, 0);
+    finishRefresh(result);
+    await upload;
+    pendingResponse = null;
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, "/api/files");
+    assert.equal(elements.file_list.children[0].children[0].textContent, 'a"<b>.gcode - 12');
+    assert.equal(elements.file_list.children[0].children[1].disabled, false);
+    assert.equal(elements.file_input.files.length, 0);
+    assert.equal(elements.upload_button.disabled, true);
+    assert.equal(reloads, 0);
+    prevented = false;
+    beforeUnload({ preventDefault() { prevented = true; } });
+    assert.equal(prevented, false);
+    await elements.file_list.children[0].children[1].onclick();
+    assert.equal(confirmations[0], 'Delete "a"<b>.gcode" from the SD card?');
+    assert.equal(requests.length, 1);
+    assert.equal(elements.file_page.inert, false);
+    assert.equal(reloads, 0);
+    result = response(500);
+    selectFile();
+    upload = elements.upload_button.onclick();
+    xhr.finish(204);
+    await upload;
+    assert.match(elements.status.textContent, /Upload succeeded.*file list/);
+    assert.equal(elements.upload_overlay.hidden, true);
+    assert.equal(elements.file_input.files.length, 0);
+    assert.equal(elements.upload_button.disabled, true);
+    assert.equal(requests.length, 2);
+    selectFile();
+    upload = elements.upload_button.onclick();
+    xhr.events.error();
+    await upload;
+    assert.match(elements.status.textContent, /Network error/);
+    assert.equal(elements.file_input.files.length, 0);
+    assert.equal(elements.upload_button.disabled, true);
+    assert.equal(requests.length, 2);
     result = response(400);
+    confirmResult = true;
     await context.del("a & b.gcode");
+    assert.equal(confirmations[1], 'Delete "a & b.gcode" from the SD card?');
     assert.equal(requests[2].url, "/?file=a%20%26%20b.gcode");
     assert.match(elements.status.textContent, /Delete failed/);
-    assert.equal(reloads, 1);
+    assert.equal(elements.upload_button.disabled, true);
+    assert.equal(reloads, 0);
     result = response(204);
     await context.del("a & b.gcode");
-    assert.equal(reloads, 2);
+    assert.equal(reloads, 1);
+    assert.equal(requests.filter(request => request.url === "/api/files").length, 2);
 }
 
 (async () => {

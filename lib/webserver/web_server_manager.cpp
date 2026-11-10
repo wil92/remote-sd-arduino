@@ -127,6 +127,10 @@ bool WebServerManager::checkEndpoints(WiFiClient *client,
         handleDeviceInfo(client);
         return false;
     }
+    if (message.startsWith("GET /api/files HTTP/")) {
+        handleFileList(client);
+        return false;
+    }
     if (message.startsWith("GET /")) {
         handleWebsite(client, message);
     }
@@ -214,6 +218,28 @@ void WebServerManager::handleDeviceInfo(WiFiClient *client) const {
     client->print("{\"type\":\"remote-sd\",\"id\":\"" + deviceId +
                   "\",\"name\":\"" + escapeJson(flashManager->deviceName) +
                   "\",\"api_version\":1}");
+}
+
+void WebServerManager::handleFileList(WiFiClient *client) const {
+    consumeIncomingData(client);
+    if (!flashManager->isSetup) {
+        client->print(prepareHeaders(404));
+        return;
+    }
+    String result = "[";
+    bool first = true;
+    for (const FileInfo &file : filesInSD) {
+        if (!first) result += ',';
+        first = false;
+        result += "{\"name\":\"" + escapeJson(file.name) +
+                  "\",\"size\":" + String(file.size) + "}";
+    }
+    result += "]";
+    client->print(String("HTTP/1.1 200 OK\r\n"
+                         "Content-Type: application/json; charset=utf-8\r\n"
+                         "Cache-Control: no-store\r\nContent-Length: ") +
+                  String(result.length()) + "\r\nConnection: close\r\n\r\n" +
+                  result);
 }
 
 void WebServerManager::handleWebsite(WiFiClient *client,
@@ -333,6 +359,7 @@ void WebServerManager::handleFileUpload(WiFiClient *client) {
     byte bBuffer[BUFFER_SIZE * 2];
     byte bSubBuffer[BUFFER_SIZE * 2];
     size_t length = 0, subLength = 0;
+    bool complete = false;
 
     sdCardManager->openFile(fileName);
     while (client->connected()) {
@@ -351,6 +378,7 @@ void WebServerManager::handleFileUpload(WiFiClient *client) {
                 if (ch == '\n' && buffer.indexOf(boundary) >= 0) {
                     sdCardManager->appendFile(fileName, bSubBuffer,
                                               subLength - 1); // remove \r
+                    complete = true;
                     break;
                 }
                 copyBytes(bSubBuffer + subLength, bBuffer, length);
@@ -370,10 +398,13 @@ void WebServerManager::handleFileUpload(WiFiClient *client) {
         }
     }
 
-    filesInSD = sdCardManager->listFiles(false);
     sdCardManager->closeFile();
+    if (complete) {
+        filesInSD = sdCardManager->listFiles(false);
+    }
     sdCardManager->end();
-    client->print(prepareHeaders(204));
+    if (!complete) Serial.println("Upload interrupted");
+    client->print(prepareHeaders(complete ? 204 : 400));
 }
 
 std::map<String, String>
@@ -530,9 +561,11 @@ String WebServerManager::prepareUploadHtmlPage() {
         disconnectSD();
     }
     for (const FileInfo &file : filesInSD) {
-        filesList += "<li>" + file.name + " - " + String(file.size) +
-                     "<button onclick=\"del('" + file.name +
-                     "')\">x</button></li>";
+        filesList += "<li><span>" + escapeHtmlAttribute(file.name) + " - " +
+                     String(file.size) +
+                     "</span><button type=\"button\" data-filename=\"" +
+                     escapeHtmlAttribute(file.name) +
+                     "\" onclick=\"del(this.dataset.filename)\">x</button></li>";
     }
 
     result.replace("$$FILES$$", filesList);

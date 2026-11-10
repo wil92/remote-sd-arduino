@@ -1,6 +1,6 @@
 # Build configuration
 
-The firmware uses the example headers in `include/` by default. To customize a
+The firmware uses the example headers in `../include` by default. To customize a
 group, copy its example to the corresponding local header and edit that copy:
 
 ```sh
@@ -9,7 +9,7 @@ cp include/access_point_config.example.h include/access_point_config.h
 cp include/usb_config.example.h include/usb_config.h
 ```
 
-Local headers under `include/` are ignored by Git. Keep private credentials in
+Local headers under `../include` are ignored by Git. Keep private credentials in
 local headers, not in example files or other tracked files.
 
 ## Network
@@ -63,13 +63,13 @@ replaces the previous results.
 ## USB
 
 `usb_config.h` defines `ARDUINO_USB_MODE` and `ARDUINO_USB_CDC_ON_BOOT`; both
-default to `1` in `src/main.h` if not defined in the local header. These are
+default to `1` in `../src/main.h` if not defined in the local header. These are
 Arduino framework settings, so PlatformIO force-includes `src/main.h` in
 every firmware compilation, including the framework and libraries. Change
 them only if appropriate for the connected board and its USB setup.
 
 After adding, changing, or removing `usb_config.h`, or changing the defaults
-in `src/main.h`, run `pio run -e esp32-c3-devkitm-1 -t clean` before building.
+in `../src/main.h`, run `pio run -e esp32-c3-devkitm-1 -t clean` before building.
 PlatformIO may otherwise reuse objects compiled with the previous settings.
 
 ## Building and testing

@@ -9,7 +9,7 @@ approval is declined or unavailable. Use the
 
 # Documentation organization
 
-Keep detailed project documentation in focused, topic-based files under `doc/`.
+Keep detailed project documentation in focused, topic-based files under `docs/`.
 Keep the root `README.md` concise as a project overview and documentation index.
-When changing behavior or documentation, update the appropriate `doc/` files and
+When changing behavior or documentation, update the appropriate `docs/` files and
 add or update README links when needed; do not duplicate detailed guides there.

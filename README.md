@@ -35,9 +35,10 @@ pio test -e tests -vvv
 
 ## Documentation
 
-- [Build configuration](doc/configuration.md)
-- [Configuration reset](doc/configuration-reset.md)
-- [Network discovery and device information API](doc/discovery.md)
+- [Build configuration](docs/configuration.md)
+- [Configuration reset](docs/configuration-reset.md)
+- [Network discovery and device information API](docs/discovery.md)
+- [File management and file list API](docs/file-management.md)
 - [Coding rules](docs/coding-rules.md)
 
 ## ESP32-C3 Super mini Pinout
