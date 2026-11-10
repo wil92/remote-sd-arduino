@@ -1,4 +1,5 @@
-#include <Arduino.h>
+#include <ArduinoFake.h>
+#include <EEPROM.h>
 #include <cstring>
 #include <fstream>
 #include <map>
@@ -7,6 +8,12 @@
 #include <vector>
 
 #include "../../../lib/webserver/web_server_manager.h"
+#include "../../../lib/scan_status.h"
+
+using namespace fakeit;
+
+uint8_t eepromData[CONFIG_STORAGE_SIZE];
+unsigned long fakeMillis;
 
 class SDCardManagerTmp : public SDCardManager {
 public:
@@ -123,6 +130,12 @@ public:
         buildUploadRequest(payload);
     }
 
+    void buildHeaders() { addData("Host: localhost\r\n\r\n"); }
+
+    void buildSensitiveHeaders() {
+        addData("Referer: http://localhost/?ssid=net&password=dummy-secret\r\n\r\n");
+    }
+
 private:
     void addData(const char *message) {
         data.insert(data.end(), message, message + std::strlen(message));
@@ -132,6 +145,341 @@ private:
         data.insert(data.end(), bytes.begin(), bytes.end());
     }
 };
+
+class SetupConnectionClient : public WiFiClientTmp {
+public:
+    bool keepOpen = false;
+    bool stopped = false;
+
+    bool connected() override {
+        return !stopped && (keepOpen || index < data.size());
+    }
+
+    void stop() override { stopped = true; }
+
+    void setRequest(const std::string &request) {
+        data.assign(request.begin(), request.end());
+    }
+};
+
+void testDeviceInfoIsJsonWithoutAccessingSD() {
+    WiFiClientTmp client;
+    client.buildHeaders();
+    WebServerManager manager;
+    FlashManager flash;
+    flash.isSetup = true;
+    SDCardManagerTmp sd;
+    manager.flashManager = &flash;
+    manager.sdCardManager = &sd;
+    manager.deviceId = "remote-sd-001122334455";
+    int switches = 0;
+    manager.sf = [&](bool) { ++switches; };
+
+    TEST_ASSERT_FALSE(manager.checkEndpoints(&client, "GET /api/device HTTP/1.1\r"));
+    TEST_ASSERT_EQUAL_STRING(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+        "Cache-Control: no-store\r\nConnection: close\r\n\r\n"
+        "{\"type\":\"remote-sd\",\"id\":\"remote-sd-001122334455\","
+        "\"name\":\"Remote SD\",\"api_version\":1}",
+        client.response.c_str());
+    TEST_ASSERT_EQUAL(0, switches);
+    TEST_ASSERT_EQUAL(0, sd.beginCalls);
+}
+
+void testSetupSavesNameAndEndpointReturnsIt() {
+    FlashManager flash;
+    WebServerManager manager;
+    manager.flashManager = &flash;
+    manager.deviceId = "remote-sd-001122334455";
+    WiFiClientTmp setupClient;
+    setupClient.buildHeaders();
+    TEST_ASSERT_TRUE(manager.checkEndpoints(
+        &setupClient,
+        "POST /?ssid=net&password=pwd&name=Printer+%22A%22+%5C+%C3%A9 HTTP/1.1\r"));
+    TEST_ASSERT_TRUE(setupClient.response.find("204 No Content") !=
+                     std::string::npos);
+    FlashManager restored;
+    restored.loadSetup();
+    TEST_ASSERT_EQUAL_STRING("Printer \"A\" \\ \xc3\xa9", restored.deviceName.c_str());
+    manager.flashManager = &restored;
+    WiFiClientTmp infoClient;
+    infoClient.buildHeaders();
+    manager.checkEndpoints(&infoClient, "GET /api/device HTTP/1.1\r");
+    TEST_ASSERT_TRUE(infoClient.response.find(
+        "\"name\":\"Printer \\\"A\\\" \\\\ \xc3\xa9\"") != std::string::npos);
+}
+
+void testSetupDoesNotLogRequestHeaders() {
+    FlashManager flash;
+    WebServerManager manager;
+    manager.flashManager = &flash;
+    WiFiClientTmp client;
+    client.buildSensitiveHeaders();
+
+    TEST_ASSERT_TRUE(manager.checkEndpoints(
+        &client, "POST /?ssid=net&password=dummy-secret HTTP/1.1\r"));
+    Verify(OverloadedMethod(ArduinoFake(Serial), println,
+                            size_t(const String &))).Never();
+}
+
+void testSetupRestartsAfterResponseEvenWithMoreClientData() {
+    FlashManager flash;
+    WebServerManager manager;
+    SetupConnectionClient client;
+    manager.flashManager = &flash;
+    client.keepOpen = true;
+    const std::string request = "POST /?ssid=net&name=Printer HTTP/1.1\r\n"
+                                "Host: localhost\r\n\r\n";
+    client.setRequest(request + "unexpected trailing data\r\n");
+    int restarts = 0;
+    int resetPolls = 0;
+    manager.checkResetButton = [&]() { ++resetPolls; };
+    manager.rf = [&]() {
+        ++restarts;
+        TEST_ASSERT_TRUE(client.stopped);
+        TEST_ASSERT_TRUE(client.response.find("204 No Content") !=
+                         std::string::npos);
+        TEST_ASSERT_TRUE(flash.isSetup);
+    };
+
+    manager.handleClient(client);
+
+    TEST_ASSERT_EQUAL(1, restarts);
+    TEST_ASSERT_EQUAL(request.size(), client.index);
+    TEST_ASSERT_GREATER_OR_EQUAL(CLIENT_TIMEOUT, fakeMillis);
+    TEST_ASSERT_LESS_THAN(CLIENT_TIMEOUT + 20, fakeMillis);
+    TEST_ASSERT_GREATER_THAN(1, resetPolls);
+}
+
+void testSetupRestartsPromptlyWhenClientDisconnects() {
+    FlashManager flash;
+    WebServerManager manager;
+    SetupConnectionClient client;
+    manager.flashManager = &flash;
+    client.setRequest("POST /?ssid=net&name=Printer HTTP/1.1\r\n"
+                      "Host: localhost\r\n\r\n");
+    int restarts = 0;
+    manager.rf = [&]() {
+        ++restarts;
+        TEST_ASSERT_TRUE(client.stopped);
+        TEST_ASSERT_TRUE(client.response.find("204 No Content") !=
+                         std::string::npos);
+    };
+
+    manager.handleClient(client);
+
+    TEST_ASSERT_EQUAL(1, restarts);
+    TEST_ASSERT_LESS_THAN(CLIENT_TIMEOUT, fakeMillis);
+}
+
+void testRejectedSetupDoesNotRestart() {
+    FlashManager flash;
+    WebServerManager manager;
+    SetupConnectionClient client;
+    manager.flashManager = &flash;
+    client.setRequest("POST /?ssid=net&name= HTTP/1.1\r\n"
+                      "Host: localhost\r\n\r\n");
+    int restarts = 0;
+    manager.rf = [&]() { ++restarts; };
+
+    manager.handleClient(client);
+
+    TEST_ASSERT_EQUAL(0, restarts);
+    TEST_ASSERT_TRUE(client.stopped);
+    TEST_ASSERT_TRUE(client.response.find("400 Bad Request") != std::string::npos);
+    TEST_ASSERT_EQUAL_UINT8(0xff, eepromData[CONFIG_STATUS_ADDRESS]);
+}
+
+void testSetupRejectsInvalidNameWithoutSavingOrRestarting() {
+    FlashManager flash;
+    WebServerManager manager;
+    manager.flashManager = &flash;
+    WiFiClientTmp client;
+    client.buildHeaders();
+    TEST_ASSERT_FALSE(manager.checkEndpoints(
+        &client, "POST /?ssid=net&name= HTTP/1.1\r"));
+    TEST_ASSERT_TRUE(client.response.find("400 Bad Request") != std::string::npos);
+    TEST_ASSERT_EQUAL_STRING("Remote SD", flash.deviceName.c_str());
+    TEST_ASSERT_EQUAL_STRING(NETWORK_SSID, flash.ssidNetwork.c_str());
+    TEST_ASSERT_EQUAL_UINT8(0xff, eepromData[CONFIG_STATUS_ADDRESS]);
+
+    WiFiClientTmp invalidUtf8Client;
+    invalidUtf8Client.buildHeaders();
+    TEST_ASSERT_FALSE(manager.checkEndpoints(
+        &invalidUtf8Client, "POST /?name=%FF HTTP/1.1\r"));
+    TEST_ASSERT_TRUE(invalidUtf8Client.response.find("400 Bad Request") !=
+                     std::string::npos);
+    TEST_ASSERT_EQUAL_UINT8(0xff, eepromData[CONFIG_STATUS_ADDRESS]);
+
+    WiFiClientTmp nullClient;
+    nullClient.buildHeaders();
+    TEST_ASSERT_FALSE(manager.checkEndpoints(
+        &nullClient, "POST /?name=Printer%00A HTTP/1.1\r"));
+    TEST_ASSERT_TRUE(nullClient.response.find("400 Bad Request") !=
+                     std::string::npos);
+    TEST_ASSERT_EQUAL_UINT8(0xff, eepromData[CONFIG_STATUS_ADDRESS]);
+}
+
+void testSetupPageEscapesNameAndDisplaysDefault() {
+    FlashManager flash;
+    WebServerManager manager;
+    manager.flashManager = &flash;
+    WiFiClientTmp defaultClient;
+    defaultClient.buildHeaders();
+    manager.checkEndpoints(&defaultClient, "GET / HTTP/1.1\r");
+    TEST_ASSERT_TRUE(defaultClient.response.find("value=\"Remote SD\"") !=
+                     std::string::npos);
+
+    flash.deviceName = "A \"<&' $$SSID$$";
+    WiFiClientTmp escapedClient;
+    escapedClient.buildHeaders();
+    manager.checkEndpoints(&escapedClient, "GET / HTTP/1.1\r");
+    TEST_ASSERT_TRUE(escapedClient.response.find(
+        "value=\"A &quot;&lt;&amp;&#39; $$SSID$$\"") != std::string::npos);
+}
+
+void testDeviceInfoUnavailableInSetupMode() {
+    WiFiClientTmp client;
+    client.buildHeaders();
+    WebServerManager manager;
+    FlashManager flash;
+    flash.isSetup = false;
+    manager.flashManager = &flash;
+
+    TEST_ASSERT_FALSE(manager.checkEndpoints(&client, "GET /api/device HTTP/1.1\r"));
+    TEST_ASSERT_TRUE(client.response.find("404 Not Found") != std::string::npos);
+    TEST_ASSERT_TRUE(client.response.find("remote-sd") == std::string::npos);
+}
+
+void testOtherGetPathsStillServeWebsite() {
+    WiFiClientTmp client;
+    client.buildHeaders();
+    WebServerManager manager;
+    FlashManager flash;
+    flash.isSetup = false;
+    manager.flashManager = &flash;
+
+    TEST_ASSERT_FALSE(
+        manager.checkEndpoints(&client, "GET /api/device-extra HTTP/1.1\r"));
+    TEST_ASSERT_TRUE(client.response.find("200 OK") != std::string::npos);
+    TEST_ASSERT_TRUE(client.response.find("Content-Type: text/html") !=
+                     std::string::npos);
+}
+
+void testNetworkScanLifecycleAndJson() {
+    FlashManager flash;
+    WebServerManager manager;
+    manager.flashManager = &flash;
+    int state = NETWORK_SCAN_FAILED;
+    int starts = 0;
+    const std::vector<String> networks = {
+        "Wi-Fi \"A\"\\", "", "\xff", "Cafe \xc3\xa9", "line\nbreak"
+    };
+    manager.scanComplete = [&]() { return state; };
+    manager.startScan = [&]() { ++starts; state = NETWORK_SCAN_RUNNING; return true; };
+    manager.scanSsid = [&](int index) { return networks[index]; };
+
+    WiFiClientTmp startClient;
+    startClient.buildHeaders();
+    manager.checkEndpoints(&startClient, "POST /scan HTTP/1.1\r");
+    TEST_ASSERT_TRUE(startClient.response.find("202 Accepted") != std::string::npos);
+    TEST_ASSERT_EQUAL(1, starts);
+
+    WiFiClientTmp concurrentClient;
+    concurrentClient.buildHeaders();
+    manager.checkEndpoints(&concurrentClient, "POST /scan HTTP/1.1\r");
+    TEST_ASSERT_TRUE(concurrentClient.response.find("202 Accepted") != std::string::npos);
+    TEST_ASSERT_EQUAL(1, starts);
+
+    WiFiClientTmp pendingClient;
+    pendingClient.buildHeaders();
+    manager.checkEndpoints(&pendingClient, "GET /refresh-ssid HTTP/1.1\r");
+    TEST_ASSERT_TRUE(pendingClient.response.find("202 Accepted") != std::string::npos);
+
+    state = static_cast<int>(networks.size());
+    WiFiClientTmp resultClient;
+    resultClient.buildHeaders();
+    manager.checkEndpoints(&resultClient, "GET /refresh-ssid HTTP/1.1\r");
+    TEST_ASSERT_TRUE(resultClient.response.find("application/json; charset=utf-8") !=
+                     std::string::npos);
+    TEST_ASSERT_TRUE(resultClient.response.find(
+        "[\"Wi-Fi \\\"A\\\"\\\\\",\"Cafe \xc3\xa9\",\"line\\u000abreak\"]") !=
+                     std::string::npos);
+
+    state = 0;
+    WiFiClientTmp emptyClient;
+    emptyClient.buildHeaders();
+    manager.checkEndpoints(&emptyClient, "GET /refresh-ssid HTTP/1.1\r");
+    TEST_ASSERT_TRUE(emptyClient.response.find("\r\n\r\n[]") != std::string::npos);
+}
+
+void testNetworkScanFailuresAndSetupMode() {
+    FlashManager flash;
+    WebServerManager manager;
+    manager.flashManager = &flash;
+    int calls = 0;
+    manager.scanComplete = []() { return NETWORK_SCAN_FAILED; };
+    manager.startScan = [&]() { ++calls; return false; };
+    manager.scanSsid = [](int) { return String("unused"); };
+    WiFiClientTmp startClient;
+    startClient.buildHeaders();
+    manager.checkEndpoints(&startClient, "POST /scan HTTP/1.1\r");
+    TEST_ASSERT_TRUE(startClient.response.find("500 Internal Server Error") != std::string::npos);
+    TEST_ASSERT_EQUAL(1, calls);
+    WiFiClientTmp resultClient;
+    resultClient.buildHeaders();
+    manager.checkEndpoints(&resultClient, "GET /refresh-ssid HTTP/1.1\r");
+    TEST_ASSERT_TRUE(resultClient.response.find("Wi-Fi scan failed") != std::string::npos);
+    flash.isSetup = true;
+    WiFiClientTmp configuredClient;
+    configuredClient.buildHeaders();
+    manager.checkEndpoints(&configuredClient, "POST /scan HTTP/1.1\r");
+    TEST_ASSERT_TRUE(configuredClient.response.find("404 Not Found") != std::string::npos);
+    TEST_ASSERT_EQUAL(1, calls);
+    WiFiClientTmp configuredResult;
+    configuredResult.buildHeaders();
+    manager.checkEndpoints(&configuredResult, "GET /refresh-ssid HTTP/1.1\r");
+    TEST_ASSERT_TRUE(configuredResult.response.find("404 Not Found") != std::string::npos);
+}
+
+void testNetworkScanCapsResults() {
+    FlashManager flash;
+    WebServerManager manager;
+    manager.flashManager = &flash;
+    int reads = 0;
+    manager.scanComplete = []() { return 100; };
+    manager.scanSsid = [&](int) { ++reads; return String("network"); };
+    WiFiClientTmp client;
+    client.buildHeaders();
+    manager.checkEndpoints(&client, "GET /refresh-ssid HTTP/1.1\r");
+    TEST_ASSERT_EQUAL(40, reads);
+
+    reads = 0;
+    manager.scanComplete = []() { return 300; };
+    manager.scanSsid = [&](int) { ++reads; return String(""); };
+    WiFiClientTmp emptyClient;
+    emptyClient.buildHeaders();
+    manager.checkEndpoints(&emptyClient, "GET /refresh-ssid HTTP/1.1\r");
+    TEST_ASSERT_EQUAL(256, reads);
+    TEST_ASSERT_TRUE(emptyClient.response.find("\r\n\r\n[]") != std::string::npos);
+}
+
+void testSetupRejectsMissingAndOversizeSsid() {
+    FlashManager flash;
+    WebServerManager manager;
+    manager.flashManager = &flash;
+    WiFiClientTmp missing;
+    missing.buildHeaders();
+    TEST_ASSERT_FALSE(manager.checkEndpoints(&missing, "POST /?ssid= HTTP/1.1\r"));
+    TEST_ASSERT_TRUE(missing.response.find("Invalid device name, SSID") !=
+                     std::string::npos);
+    WiFiClientTmp oversized;
+    oversized.buildHeaders();
+    TEST_ASSERT_FALSE(manager.checkEndpoints(
+        &oversized, "POST /?ssid=abcdefghijklmnopqrstuvwxyz1234567 HTTP/1.1\r"));
+    TEST_ASSERT_TRUE(oversized.response.find("400 Bad Request") != std::string::npos);
+    TEST_ASSERT_EQUAL_UINT8(0xff, eepromData[CONFIG_STATUS_ADDRESS]);
+}
 
 void testUploadPollsWhileWaitingForHeaders() {
     class WaitingClient : public WiFiClientTmp {
@@ -454,12 +802,46 @@ void testCopyBytesHandlesZeroLength() {
     TEST_ASSERT_EQUAL_UINT8(9, destination[1]);
 }
 
-void setUp(void) {}
+void setUp(void) {
+    ArduinoFakeReset();
+    fakeMillis = 0;
+    std::memset(eepromData, 0xff, sizeof(eepromData));
+    When(Method(ArduinoFake(Function), millis))
+        .AlwaysDo([]() { return fakeMillis++; });
+    When(Method(ArduinoFake(Function), delay))
+        .AlwaysDo([](unsigned long duration) { fakeMillis += duration; });
+    When(Method(ArduinoFake(EEPROM), write))
+        .AlwaysDo([](int index, uint8_t value) { eepromData[index] = value; });
+    When(Method(ArduinoFake(EEPROM), read))
+        .AlwaysDo([](int index) { return eepromData[index]; });
+    When(OverloadedMethod(ArduinoFake(Serial), println, size_t(const String &)))
+        .AlwaysReturn(0);
+    When(OverloadedMethod(ArduinoFake(Serial), println, size_t(const char *)))
+        .AlwaysReturn(0);
+    When(OverloadedMethod(ArduinoFake(Serial), print, size_t(const String &)))
+        .AlwaysReturn(0);
+    When(OverloadedMethod(ArduinoFake(Serial), print, size_t(const char *)))
+        .AlwaysReturn(0);
+}
 
 void tearDown(void) {}
 
 int runUnitTests() {
     UNITY_BEGIN();
+    RUN_TEST(testDeviceInfoIsJsonWithoutAccessingSD);
+    RUN_TEST(testSetupSavesNameAndEndpointReturnsIt);
+    RUN_TEST(testSetupDoesNotLogRequestHeaders);
+    RUN_TEST(testSetupRestartsAfterResponseEvenWithMoreClientData);
+    RUN_TEST(testSetupRestartsPromptlyWhenClientDisconnects);
+    RUN_TEST(testRejectedSetupDoesNotRestart);
+    RUN_TEST(testSetupRejectsInvalidNameWithoutSavingOrRestarting);
+    RUN_TEST(testSetupPageEscapesNameAndDisplaysDefault);
+    RUN_TEST(testDeviceInfoUnavailableInSetupMode);
+    RUN_TEST(testOtherGetPathsStillServeWebsite);
+    RUN_TEST(testNetworkScanLifecycleAndJson);
+    RUN_TEST(testNetworkScanFailuresAndSetupMode);
+    RUN_TEST(testNetworkScanCapsResults);
+    RUN_TEST(testSetupRejectsMissingAndOversizeSsid);
     RUN_TEST(testUploadPollsWhileWaitingForHeaders);
     RUN_TEST(testUploadPollsWhileWaitingForFileData);
     RUN_TEST(testUploadFileCopiesFixtureExactly);

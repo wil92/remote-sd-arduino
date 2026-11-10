@@ -1,56 +1,112 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Device configuration page</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Remote SD configuration</title>
+    <style>$$STYLES$$</style>
 </head>
 <body>
-<h1>Configuration Page</h1>
-<h2>Network</h2>
-<div>
-    <label for="ssid">SSID</label>
-    <input type="text" id="ssid" value="$$SSID$$">
-</div>
-<div>
+<main>
+    <h1>Device configuration</h1>
+    <label for="name">Device name</label>
+    <input id="name" type="text" value="$$NAME$$" maxlength="64" required>
+    <label for="ssid">Wi-Fi network</label>
+    <div class="network">
+        <input id="ssid" type="text" value="$$SSID$$" list="networks" autocomplete="off" required>
+        <button id="refresh" type="button">Refresh</button>
+    </div>
+    <datalist id="networks"></datalist>
+    <p id="scan_status" class="status" role="status" aria-live="polite"></p>
     <label for="password">Password</label>
-    <input type="text" id="password" value="$$PASSWORD$$">
-</div>
-<button id="summit" style="margin-top: 20px;">Configure device</button>
-</body>
+    <input id="password" type="password" value="$$PASSWORD$$" autocomplete="new-password">
+    <small>Leave empty for an open network.</small>
+    <div><button id="summit" class="action" type="button">Configure device</button></div>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+</main>
 <script>
-    var but = document.getElementById("summit");
+    const ssidInput = document.getElementById("ssid");
+    const passwordInput = document.getElementById("password");
+    const deviceNameInput = document.getElementById("name");
+    const networksList = document.getElementById("networks");
+    const scanStatus = document.getElementById("scan_status");
+    const statusMessage = document.getElementById("status");
+    const refreshButton = document.getElementById("refresh");
+    const saveButton = document.getElementById("summit");
+    let configured = false;
 
-    var ssid = document.getElementById("ssid");
-    var password = document.getElementById("password");
-
-    function toQueryString(obj) {
-        return Object.keys(obj).map(key => `${encodeURIComponent(key)}=${encodeURIComponent(obj[key])}`).join('&');
+    function showMessage(element, message, error = false) {
+        element.textContent = message;
+        element.classList.toggle("error", error);
     }
 
-    but.onclick = function () {
-        var queries = {
-            ssid: ssid.value,
-            password: password.value,
-        };
-        fetch(`/?${toQueryString(queries)}`, {method: 'post'})
-            .then(() => console.log("Device configurated"))
-            .catch(e => console.error(e));
-    };
-
-    function removeDefaultValue(ele, isCheckbox = false) {
-        if (ele.value.startsWith("$$") && ele.value.endsWith("$$")) {
-            ele.value = "";
-            if (isCheckbox) {
-                ele.checked = true;
+    async function scanNetworks() {
+        refreshButton.disabled = true;
+        showMessage(scanStatus, "Scanning for Wi-Fi networks...");
+        try {
+            const start = await fetch("/scan", {method: "POST"});
+            if (!start.ok) throw new Error(await start.text() || `HTTP ${start.status}`);
+            for (let attempt = 0; attempt < 30; attempt++) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+                const response = await fetch("/refresh-ssid", {cache: "no-store"});
+                if (response.status === 202) continue;
+                if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`);
+                const names = await response.json();
+                if (!Array.isArray(names) || !names.every(name => typeof name === "string")) {
+                    throw new Error("Invalid network list.");
+                }
+                networksList.replaceChildren();
+                for (const name of names) {
+                    const option = document.createElement("option");
+                    option.value = name;
+                    networksList.appendChild(option);
+                }
+                showMessage(scanStatus, names.length ?
+                    "Choose a network or enter its SSID." :
+                    "No networks found. You can enter an SSID manually.");
+                return;
             }
-        } else if (isCheckbox) {
-            ele.checked = ele.value === 'true';
-            ele.value = "";
+            throw new Error("Scan timed out. Try refreshing.");
+        } catch (error) {
+            showMessage(scanStatus, `Network scan failed: ${error.message}`, true);
+        } finally {
+            refreshButton.disabled = configured;
         }
     }
 
-    (function () {
-        removeDefaultValue(ssid);
-        removeDefaultValue(password);
-    })();
+    refreshButton.onclick = scanNetworks;
+    saveButton.onclick = async function () {
+        if (!deviceNameInput.value || new Blob([deviceNameInput.value]).size > 64 ||
+            /[\x00-\x1f\x7f]/.test(deviceNameInput.value)) {
+            showMessage(statusMessage, "Device name must be 1-64 UTF-8 bytes without control characters.", true);
+            return;
+        }
+        if (!ssidInput.value || new Blob([ssidInput.value]).size > 32) {
+            showMessage(statusMessage, "SSID must be 1-32 UTF-8 bytes.", true);
+            return;
+        }
+        saveButton.disabled = true;
+        showMessage(statusMessage, "Saving configuration...");
+        const values = {
+            ssid: ssidInput.value,
+            password: passwordInput.value,
+            name: deviceNameInput.value,
+        };
+        const query = Object.keys(values).map(key =>
+            `${encodeURIComponent(key)}=${encodeURIComponent(values[key])}`).join("&");
+        try {
+            const response = await fetch(`/?${query}`, {method: "POST"});
+            if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`);
+            configured = true;
+            refreshButton.disabled = true;
+            showMessage(statusMessage, "Device configured. The device is restarting.");
+        } catch (error) {
+            showMessage(statusMessage, `Could not configure device: ${error.message}`, true);
+            saveButton.disabled = false;
+        }
+    };
+
+    scanNetworks();
 </script>
+</body>
 </html>

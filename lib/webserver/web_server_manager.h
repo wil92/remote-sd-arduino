@@ -26,7 +26,23 @@ using ResetFunction = std::function<void(void)>;
 using EnableSDFunction = std::function<void(bool)>;
 
 class WebServerManager {
+#ifndef ARDUINO_ARCH_ESP32
+public:
+#endif
     bool checkEndpoints(WiFiClient *client, const String &message);
+
+    void handleClient(WiFiClient &client);
+
+#ifndef ARDUINO_ARCH_ESP32
+private:
+#endif
+    void handleDeviceInfo(WiFiClient *client) const;
+
+    void startNetworkScan(WiFiClient *client) const;
+
+    void sendNetworks(WiFiClient *client) const;
+
+    void sendTextResponse(WiFiClient *client, int code, const String &text) const;
 
     String prepareHeaders(int code) const;
 
@@ -40,7 +56,7 @@ class WebServerManager {
 
     void handleWebsite(WiFiClient *client, const String &message);
 
-    void handleUpdateConfig(WiFiClient *client, const String &message) const;
+    bool handleUpdateConfig(WiFiClient *client, const String &message) const;
 
     void handleFileDeletion(WiFiClient *client, const String &message);
 
@@ -81,11 +97,15 @@ private:
 public:
     FlashManager *flashManager = nullptr;
     std::function<void()> checkResetButton;
+    std::function<bool()> startScan;
+    std::function<int()> scanComplete;
+    std::function<String(int)> scanSsid;
     std::unique_ptr<WiFiServer> server;
     ResetFunction rf;
     EnableSDFunction sf;
     SDCardManager *sdCardManager = nullptr;
     std::vector<FileInfo> filesInSD;
+    String deviceId;
 
     void setup();
 

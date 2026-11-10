@@ -16,6 +16,7 @@ FlashManager flashManager;
 WebServerManager webServer;
 SDCardManager sdCardManager;
 ResetButton resetButton;
+bool webServerReady = false;
 
 void resetConfigWhenButtonPress() {
     resetButton.check(
@@ -28,7 +29,10 @@ void resetConfigWhenButtonPress() {
             }
             return true;
         },
-        []() { ESP.restart(); });
+        []() {
+            Serial.println("Restarting ESP...");
+            ESP.restart();
+        });
 }
 
 void enableSD(bool status) { digitalWrite(SWITCH_SD_PIN, status ? LOW : HIGH); }
@@ -36,7 +40,7 @@ void enableSD(bool status) { digitalWrite(SWITCH_SD_PIN, status ? LOW : HIGH); }
 void setup() {
     Serial.begin(9600);
 
-    EEPROM.begin(512);
+    EEPROM.begin(CONFIG_STORAGE_SIZE);
 
     flashManager.loadSetup();
 
@@ -49,9 +53,11 @@ void setup() {
     webServer.checkResetButton = resetConfigWhenButtonPress;
 
     if (flashManager.isSetup) {
-        networkManager.connectToNetwork(flashManager.ssidNetwork.c_str(),
-                                        flashManager.passwordNetwork.c_str(),
-                                        resetConfigWhenButtonPress);
+        if (!networkManager.connectToNetwork(flashManager.ssidNetwork.c_str(),
+                                             flashManager.passwordNetwork.c_str(),
+                                             resetConfigWhenButtonPress)) {
+            return;
+        }
 
         webServer.flashManager = &flashManager;
         webServer.sdCardManager = &sdCardManager;
@@ -59,6 +65,15 @@ void setup() {
         webServer.sf = enableSD;
         webServer.setup();
         webServer.run();
+        webServerReady = true;
+
+        String deviceId = WiFi.macAddress();
+        deviceId.replace(":", "");
+        deviceId.toLowerCase();
+        webServer.deviceId = "remote-sd-" + deviceId;
+        if (!networkManager.startDiscovery(webServer.deviceId)) {
+            Serial.println("Device discovery unavailable; HTTP remains active");
+        }
     } else {
         if (!networkManager.createHotspot(AP_SSID, AP_PASSWORD,
                                           resetConfigWhenButtonPress)) {
@@ -68,12 +83,20 @@ void setup() {
 
         webServer.flashManager = &flashManager;
         webServer.rf = []() { ESP.restart(); };
+        webServer.startScan = []() { return networkManager.startScan(); };
+        webServer.scanComplete = []() { return networkManager.scanComplete(); };
+        webServer.scanSsid = [](int index) {
+            return networkManager.scanSsid(index);
+        };
         webServer.setup();
         webServer.run();
+        webServerReady = true;
     }
 }
 
 void loop() {
     resetConfigWhenButtonPress();
-    webServer.loop();
+    if (webServerReady) {
+        webServer.loop();
+    }
 }

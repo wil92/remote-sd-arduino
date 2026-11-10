@@ -1,12 +1,11 @@
 #pragma once
 
 #include <WiFi.h>
-#include <WiFiMulti.h>
 #include <functional>
-#include <memory>
+
+#include "../scan_status.h"
 
 class NetworkManager {
-    std::unique_ptr<WiFiMulti> wiFiMulti_;
     IPAddress localIp_;
     IPAddress gateway_;
     IPAddress subnet_;
@@ -14,8 +13,16 @@ class NetworkManager {
 public:
     NetworkManager();
 
-    void connectToNetwork(const char *ssidNetwork, const char *passwordNetwork,
+    bool connectToNetwork(const char *ssidNetwork, const char *passwordNetwork,
                           const std::function<void()> &checkResetButton = {});
+
+    bool startDiscovery(const String &hostname) const;
+
+    bool startScan() const;
+
+    int scanComplete() const;
+
+    String scanSsid(int index) const;
 
     bool createHotspot(const char *ssidNetwork,
                        const char *passwordNetwork,

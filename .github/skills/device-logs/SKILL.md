@@ -13,7 +13,7 @@ requires serial output.
 2. Use `pio device list` to identify available serial ports. If multiple
    devices are present or the intended target is unclear, ask the user which
    port belongs to the device. Do not guess or upload firmware.
-3. Open `pio device monitor -e esp32dev --baud 115200` from the project root;
+3. Open `pio device monitor -e esp32-c3-devkitm-1 --baud 115200` from the project root;
    add `--port <port>` when the target port was identified. Monitor only long
    enough to capture the relevant output, then exit with Ctrl+C. If the
    monitor cannot run interactively, use a bounded capture compatible with

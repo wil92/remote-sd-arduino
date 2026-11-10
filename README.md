@@ -10,6 +10,7 @@ device, like 3D printers, IoT devices, or embedded systems.
 
 - Read and write files on the SD card over the network via HTTP.
 - Simple web interface for file management.
+- mDNS discovery and a device information endpoint for network clients.
 - Lightweight and easy to deploy on microcontrollers.
 
 ## Requirements
@@ -36,6 +37,7 @@ pio test -e tests -vvv
 
 - [Build configuration](doc/configuration.md)
 - [Configuration reset](doc/configuration-reset.md)
+- [Network discovery and device information API](doc/discovery.md)
 - [Coding rules](docs/coding-rules.md)
 
 ## ESP32-C3 Super mini Pinout

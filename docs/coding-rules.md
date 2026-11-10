@@ -11,7 +11,7 @@ follow the conventions below.
 - Put reusable firmware modules in `lib/`, grouped by responsibility
   (for example, `lib/network/`, `lib/display/`, and `lib/flash/`).
 - Put host-side tests and their hardware stubs in `test/host/`.
-- Put detailed documentation in focused, topic-based files under `doc/`.
+- Put detailed documentation in focused, topic-based files under `docs/`.
   Keep the root `README.md` concise as a project overview and documentation
   index, with links to relevant guides rather than duplicated details.
 - Use `snake_case` for source and test file names, including `.h` and `.cpp`

@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "../flash/flash_manager.h"
 #include "../sdcard/file_info.h"
 
 #include <vector>
@@ -18,7 +19,7 @@ public:
 
     virtual String readStringUntil(char delimiter) { return ""; }
 
-    void stop() {}
+    virtual void stop() {}
 
     virtual void print(String ignore) {}
 
@@ -34,21 +35,6 @@ public:
     void setNoDelay(bool ignore) {}
 
     WiFiClient accept() { return WiFiClient(); }
-};
-
-class FlashManager {
-public:
-    String ssidNetwork = "";
-    String passwordNetwork = "";
-    bool isSetup = true;
-
-    void loadSetup() {}
-
-    void saveSetup() {}
-
-    bool resetSetup() { return true; }
-
-    void setVariable(const String &key, const String &value) {}
 };
 
 class SDCardManager {
