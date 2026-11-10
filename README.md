@@ -39,6 +39,7 @@ pio test -e tests -vvv
 - [Configuration reset](docs/configuration-reset.md)
 - [Network discovery and device information API](docs/discovery.md)
 - [File management and file list API](docs/file-management.md)
+- [Cura plugin installation and usage](docs/cura-plugin.md)
 - [Coding rules](docs/coding-rules.md)
 
 ## ESP32-C3 Super mini Pinout

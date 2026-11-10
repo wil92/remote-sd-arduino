@@ -2,3 +2,6 @@
 .idea
 /include/*
 !/include/*.example.h
+/ultimate-cura-plugin/dist/
+__pycache__/
+*.pyc

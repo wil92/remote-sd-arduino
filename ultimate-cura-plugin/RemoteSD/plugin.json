@@ -1,0 +1,8 @@
+{
+    "name": "Remote SD",
+    "author": "Remote SD contributors",
+    "version": "1.0.0",
+    "description": "Save sliced G-code to a Remote SD device on the local network.",
+    "api": 8,
+    "supported_sdk_versions": ["8.0.0"]
+}
